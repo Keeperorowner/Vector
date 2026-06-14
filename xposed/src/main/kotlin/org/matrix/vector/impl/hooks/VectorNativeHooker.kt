@@ -130,8 +130,18 @@ internal fun unfreezeHooks(modulePackageName: String) {
     HookRegistry.unfreeze(modulePackageName)
 }
 
+internal fun unhookAllModuleHooks(
+    modulePackageName: String,
+    except: Set<HookHandle> = emptySet(),
+) {
+    val excludedRecords = except.mapNotNull { (it as? VectorHookHandle)?.record }.toSet()
+    HookRegistry.allRecords
+        .filter { it.modulePackageName == modulePackageName && it !in excludedRecords }
+        .forEach(::uninstallRecord)
+}
+
 private class VectorHookHandle(
-    private val record: VectorHookRecord,
+    val record: VectorHookRecord,
     private val hookKey: HookKey?,
 ) : HookHandle {
     override fun getExecutable(): Executable = record.executable
@@ -188,6 +198,9 @@ private fun installRecord(record: VectorHookRecord) {
 private fun uninstallRecord(record: VectorHookRecord): Boolean {
     if (!record.deactivate()) return false
     HookBridge.unhookMethod(true, record.executable, record)
+    record.id?.let { id ->
+        HookRegistry.records.remove(HookKey(record.modulePackageName, record.executable, id), record)
+    }
     HookRegistry.allRecords.remove(record)
     return true
 }
