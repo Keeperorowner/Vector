@@ -222,11 +222,12 @@ object ApplicationService : ILSPApplicationService.Stub() {
     if (target.modulePackageName != module.packageName) {
       throw SecurityException("Target $targetId does not belong to ${module.packageName}")
     }
-    if (target.state == HookedProcess.TARGET_STATE_RELOADING) {
-      throw HotReloadInProgressException("Target $targetId is already reloading")
+    synchronized(target) {
+      if (target.state == HookedProcess.TARGET_STATE_RELOADING) {
+        throw HotReloadInProgressException("Target $targetId is already reloading")
+      }
+      target.state = HookedProcess.TARGET_STATE_RELOADING
     }
-
-    target.state = HookedProcess.TARGET_STATE_RELOADING
     runCatching {
           target.target.hotReloadModule(module, extras)
           target.loadedVersionCode = module.versionCode

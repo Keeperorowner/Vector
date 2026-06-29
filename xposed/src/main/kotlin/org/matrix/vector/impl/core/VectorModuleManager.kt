@@ -42,6 +42,7 @@ object VectorModuleManager {
     /**
      * Loads a module APK, instantiates its entry classes, and binds them to the Vector framework.
      */
+    @Synchronized
     fun loadModule(module: Module, isSystemServer: Boolean, processName: String): Boolean {
         try {
             Log.d(TAG, "Loading module ${module.packageName}")
@@ -197,7 +198,6 @@ object VectorModuleManager {
                 VectorLifecycleManager.activeModules.add(entry)
                 runCatching { entry.onHotReloaded(param) }
                     .onFailure { Log.e(TAG, "Error in onHotReloaded for ${module.packageName}", it) }
-                    .getOrThrow()
             }
         } finally {
             if (newStateCommitted) {
@@ -253,29 +253,31 @@ object VectorModuleManager {
         value: Any?,
         oldClassLoaders: Set<ClassLoader>,
         seen: MutableSet<Any> = Collections.newSetFromMap(IdentityHashMap<Any, Boolean>()),
+        depth: Int = 0,
     ): Boolean {
         if (value == null || !seen.add(value)) return false
+        if (depth > 64) return false
         if (value is ClassLoader && value in oldClassLoaders) return true
         if (value is Class<*> && value.classLoader in oldClassLoaders) return true
         if (value.javaClass.classLoader in oldClassLoaders) return true
         if (value is Bundle) {
             return value.keySet().any { key ->
-                runCatching { containsOldClassLoaderObject(value.get(key), oldClassLoaders, seen) }
+                runCatching { containsOldClassLoaderObject(value.get(key), oldClassLoaders, seen, depth + 1) }
                     .getOrDefault(true)
             }
         }
         if (value is Map<*, *>) {
             return value.entries.any {
-                containsOldClassLoaderObject(it.key, oldClassLoaders, seen) ||
-                    containsOldClassLoaderObject(it.value, oldClassLoaders, seen)
+                containsOldClassLoaderObject(it.key, oldClassLoaders, seen, depth + 1) ||
+                    containsOldClassLoaderObject(it.value, oldClassLoaders, seen, depth + 1)
             }
         }
         if (value is Iterable<*>) {
-            return value.any { containsOldClassLoaderObject(it, oldClassLoaders, seen) }
+            return value.any { containsOldClassLoaderObject(it, oldClassLoaders, seen, depth + 1) }
         }
         if (value.javaClass.isArray) {
             for (index in 0 until Array.getLength(value)) {
-                if (containsOldClassLoaderObject(Array.get(value, index), oldClassLoaders, seen)) {
+                if (containsOldClassLoaderObject(Array.get(value, index), oldClassLoaders, seen, depth + 1)) {
                     return true
                 }
             }
