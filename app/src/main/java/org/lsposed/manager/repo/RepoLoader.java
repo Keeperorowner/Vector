@@ -80,9 +80,28 @@ public class RepoLoader {
     private static final String backupRepoUrl = "https://modules-blogcdn.lsposed.org/";
 
     private static final String secondBackupRepoUrl = "https://modules-cloudflare.lsposed.org/";
+    private static final String originSign = "b2f9efa527303f4d47e2c2ad56916773";
+    private static final String originTimestamp = "1781516813";
     private static String repoUrl = originRepoUrl;
+
     private final Resources resources = App.getInstance().getResources();
     private final String[] channels = resources.getStringArray(R.array.update_channel_values);
+
+    /**
+     * Module detail ({@code module/<pkg>.json}) is only served by the origin mirror
+     * with signature; backup mirrors return 418/NXDOMAIN, so always use origin.
+     */
+    private static String signedUrl(String path) {
+        boolean isModuleDetail = path.startsWith("module/");
+        if (isModuleDetail) {
+            return originRepoUrl + path + "?sign=" + originSign + "&t=" + originTimestamp;
+        }
+        String base = repoUrl + path;
+        if (repoUrl.equals(originRepoUrl)) {
+            return base + "?sign=" + originSign + "&t=" + originTimestamp;
+        }
+        return base;
+    }
 
     public boolean isRepoLoaded() {
         return repoLoaded;
@@ -97,9 +116,14 @@ public class RepoLoader {
     }
 
     synchronized public void loadRemoteData() {
+        loadRemoteData(originRepoUrl);
+    }
+
+    synchronized private void loadRemoteData(String tryUrl) {
         repoLoaded = false;
+        repoUrl = tryUrl;
         try {
-            try (var response = App.getOkHttpClient().newCall(new Request.Builder().url(repoUrl + "modules.json").build()).execute()) {
+            try (var response = App.getOkHttpClient().newCall(new Request.Builder().url(signedUrl("modules.json")).build()).execute()) {
 
                 if (response.isSuccessful()) {
                     ResponseBody body = response.body();
@@ -119,15 +143,16 @@ public class RepoLoader {
             }
         } catch (Throwable e) {
             Log.e(App.TAG, "load remote data", e);
-            for (RepoListener listener : listeners) {
-                listener.onThrowable(e);
-            }
-            if (repoUrl.equals(originRepoUrl)) {
-                repoUrl = backupRepoUrl;
-                loadRemoteData();
-            } else if (repoUrl.equals(backupRepoUrl)) {
-                repoUrl = secondBackupRepoUrl;
-                loadRemoteData();
+            if (tryUrl.equals(originRepoUrl)) {
+                loadRemoteData(backupRepoUrl);
+            } else if (tryUrl.equals(backupRepoUrl)) {
+                loadRemoteData(secondBackupRepoUrl);
+            } else {
+                // Mirrors exhausted; restore origin for next refresh and detail requests.
+                repoUrl = originRepoUrl;
+                for (RepoListener listener : listeners) {
+                    listener.onThrowable(e);
+                }
             }
         }
     }
@@ -248,20 +273,13 @@ public class RepoLoader {
     }
 
     public void loadRemoteReleases(String packageName) {
-        App.getOkHttpClient().newCall(new Request.Builder().url(String.format(repoUrl + "module/%s.json", packageName)).build()).enqueue(new Callback() {
+        App.getOkHttpClient().newCall(new Request.Builder().url(signedUrl(String.format("module/%s.json", packageName))).build()).enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
                 Log.e(App.TAG, call.request().url() + e.getMessage());
-                if (repoUrl.equals(originRepoUrl)) {
-                    repoUrl = backupRepoUrl;
-                    loadRemoteReleases(packageName);
-                } else if (repoUrl.equals(backupRepoUrl)) {
-                    repoUrl = secondBackupRepoUrl;
-                    loadRemoteReleases(packageName);
-                } else {
-                    for (RepoListener listener : listeners) {
-                        listener.onThrowable(e);
-                    }
+                // module/<pkg>.json only served by origin; do not fall back to mirrors.
+                for (RepoListener listener : listeners) {
+                    listener.onThrowable(e);
                 }
             }
 
@@ -285,6 +303,11 @@ public class RepoLoader {
                                 listener.onThrowable(t);
                             }
                         }
+                    }
+                } else {
+                    // Surface non-2xx instead of silently showing empty readme.
+                    for (RepoListener listener : listeners) {
+                        listener.onThrowable(new IOException("HTTP " + response.code() + " for " + call.request().url()));
                     }
                 }
             }
