@@ -31,7 +31,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
-import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.text.Spannable;
@@ -58,8 +57,6 @@ import androidx.appcompat.widget.SearchView;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.bumptech.glide.request.target.CustomTarget;
-import com.bumptech.glide.request.transition.Transition;
 import com.google.android.material.checkbox.MaterialCheckBox;
 
 import org.lsposed.lspd.models.Application;
@@ -401,22 +398,10 @@ public class ScopeAdapter extends EmptyStateRecyclerView.EmptyStateAdapter<Scope
         int userId = appInfo.applicationInfo.uid / App.PER_USER_RANGE;
         appName = system ? activity.getString(R.string.android_framework) : appInfo.label;
         holder.appName.setText(appName);
-        GlideApp.with(holder.appIcon).load(appInfo.packageInfo).into(new CustomTarget<Drawable>() {
-            @Override
-            public void onResourceReady(@NonNull Drawable resource, @Nullable Transition<? super Drawable> transition) {
-                holder.appIcon.setImageDrawable(resource);
-            }
-
-            @Override
-            public void onLoadCleared(@Nullable Drawable placeholder) {
-
-            }
-
-            @Override
-            public void onLoadFailed(@Nullable Drawable errorDrawable) {
-                holder.appIcon.setImageDrawable(pm.getDefaultActivityIcon());
-            }
-        });
+        GlideApp.with(holder.appIcon)
+                .load(appInfo.packageInfo)
+                .error(pm.getDefaultActivityIcon())
+                .into(holder.appIcon);
         if (system) {
             //noinspection SetTextI18n
             holder.appPackageName.setText("system");
